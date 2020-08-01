@@ -9,3 +9,13 @@
     $ go get -u github.com/sirupsen/logrus
     $ go get -u github.com/gin-gonic/gin
     $ go get -u github.com/toorop/gin-logrus
+
+## Build binaries using docker
+
+    $ cd cabri/src
+    $ docker build --pull -t cabri_build:dev001 .
+    $ docker run --rm cabri_build:dev001 cat /cabri-server > ~/bin/cabri-server
+    $ docker run --rm cabri_build:dev001 cat /cabri-synchro-client > ~/bin/cabri-synchro-client
+    $ chmod ugo+x ~/bin/cabri-*
+
+
