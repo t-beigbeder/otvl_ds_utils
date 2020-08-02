@@ -12,6 +12,8 @@
 
 ## Build binaries using docker
 
+The Dockerfile will build the server and a client example synchronizing S3 objects to a Filesystem.
+
     $ cd cabri/src
     $ docker build --pull -t cabri_build:dev001 .
     $ docker run --rm cabri_build:dev001 cat /cabri-server > ~/bin/cabri-server
