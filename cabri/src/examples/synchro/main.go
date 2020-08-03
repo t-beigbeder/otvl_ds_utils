@@ -20,7 +20,7 @@ var debug = false
 var mu sync.Mutex
 var currentDirs = make(map[string]bool)
 var currentContents = make(map[string]bool)
-var listChan chan string
+var maxOutstanding = 5
 
 func usage() {
 	log.Fatalf("Incorrect flags please read the documentation")
@@ -77,20 +77,32 @@ func getCurrentDir(dir string) bool {
 }
 
 func runSynchro(sourceUrl string, targetUrl string) {
-	logrus.Debugf("runSynchro %s %s", sourceUrl, targetUrl)
-	listChan = make(chan string, 5)
+	entriesChan := make(chan []string, maxOutstanding)
+	currentChan := make(chan string)
 
-	listChan <- "/"
+	logrus.Debugf("runSynchro %s %s", sourceUrl, targetUrl)
+
+	for i := 0; i < maxOutstanding; i++ {
+		go listConsumer(sourceUrl, targetUrl, entriesChan, currentChan)
+	}
+
+	entriesChan <- []string{"/"}
 
 	for {
-		path := <-listChan
-		if path[len(path)-1] == '/' {
-			setCurrent(path, "")
+		entries := <-entriesChan
+		logrus.Debugf("runSynchro len entries %d", len(entries))
+
+		for _, path := range entries {
+			if path[len(path)-1] == '/' {
+				setCurrent(path, "")
+			}
+			logrus.Debugf("runSynchro currentChan %s", currentChan)
+			currentChan <- path
 		}
-		go listConsumer(sourceUrl, targetUrl, path)
-		logrus.Debugf("runSynchro len chan %d", len(listChan))
+
+		logrus.Debugf("runSynchro len entriesChan %d", len(entriesChan))
 		count := 0
-		for len(listChan) == 0 {
+		for len(entriesChan) == 0 {
 			time.Sleep(100 * time.Millisecond)
 			count += 1
 			if count == 600 {
@@ -105,27 +117,28 @@ func runSynchro(sourceUrl string, targetUrl string) {
 
 }
 
-func listConsumer(sourceUrl string, targetUrl string, path string) {
-	logrus.Debugf("listConsumer %s", path)
-	if path[len(path)-1] == '/' {
-		setCurrent(path, "")
-		defer clearCurrent(path, "")
-		waitForParentDir(path)
-		entries := synchroDir(sourceUrl, targetUrl, path)
-		clearCurrent(path, "")
-		for _, entry := range entries {
-			listChan <- entry
+func listConsumer(sourceUrl string, targetUrl string, entriesChan chan []string, currentChan chan string) {
+	for {
+		path := <-currentChan
+		logrus.Debugf("listConsumer %s", path)
+		if path[len(path)-1] == '/' {
+			setCurrent(path, "")
+			defer clearCurrent(path, "")
+			waitForParentDir(path)
+			entries := synchroDir(sourceUrl, targetUrl, path)
+			clearCurrent(path, "")
+			entriesChan <- entries
+		} else {
+			setCurrent("", path)
+			defer clearCurrent("", path)
+			waitForParentDir(path)
+			synchroContent(sourceUrl, targetUrl, path)
 		}
-	} else {
-		setCurrent("", path)
-		defer clearCurrent("", path)
-		waitForParentDir(path)
-		synchroContent(sourceUrl, targetUrl, path)
-	}
-	if debug {
-		logrus.Debugf("listConsumer %s sleep", path)
-		time.Sleep(5 * time.Second)
+		if debug {
+			logrus.Debugf("listConsumer %s sleep", path)
+			time.Sleep(5 * time.Second)
 
+		}
 	}
 }
 
@@ -216,7 +229,7 @@ func synchroDir(sourceUrl string, targetUrl string, path string) (entries []stri
 			log.Printf("synchroDir: read: %s error %v", path, err)
 			return
 		}
-		logrus.Debugf("synchroDir ReadString listChan append %s (%s)", line[len(urlPrefix(sourceUrl))+1:len(line)-1], urlPrefix(sourceUrl))
+		logrus.Debugf("synchroDir ReadString entries append %s (%s)", line[len(urlPrefix(sourceUrl))+1:len(line)-1], urlPrefix(sourceUrl))
 		entries = append(entries, line[len(urlPrefix(sourceUrl))+1:len(line)-1])
 		// listChan <- line[len(urlPrefix(sourceUrl))+1 : len(line)-1]
 	}
