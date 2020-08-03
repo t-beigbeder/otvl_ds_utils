@@ -8,6 +8,4 @@ RUN go get -u github.com/toorop/gin-logrus
 
 COPY cabri /usr/local/go/src/cabri
 COPY server server
-COPY examples examples
 RUN go build server/main.go && mv main /cabri-server
-RUN go build examples/synchro/main.go && mv main /cabri-synchro-client
