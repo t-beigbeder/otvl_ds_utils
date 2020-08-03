@@ -15,9 +15,10 @@
 The Dockerfile will build the server and a client example synchronizing S3 objects to a Filesystem.
 
     $ cd cabri/src
-    $ docker build --pull -t cabri_build:dev001 .
-    $ docker run --rm cabri_build:dev001 cat /cabri-server > ~/bin/cabri-server
-    $ docker run --rm cabri_build:dev001 cat /cabri-synchro-client > ~/bin/cabri-synchro-client
+    $ docker build --pull -t cabri_server_build:dev001 -f BuildServerDockerfile .
+    $ docker run --rm cabri_server_build:dev001 cat /cabri-server > ~/bin/cabri-server
+    $ docker build --pull -t cabri_client_build:dev001 -f BuildSynchroDockerfile .
+    $ docker run --rm cabri_client_build:dev001 cat /cabri-synchro-client > ~/bin/cabri-synchro-client
     $ chmod ugo+x ~/bin/cabri-*
 
 

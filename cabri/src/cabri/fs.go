@@ -24,6 +24,11 @@ func fsGetContent(c *gin.Context, rscPath string, checksum string) {
 	var f *os.File
 	var err error
 	if f, err = os.Open(path); err != nil {
+		if checksum != "" {
+			w := c.Writer
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		GetContentError(c, path, err, http.StatusNotFound)
 		return
 	}
@@ -76,7 +81,8 @@ func FSStatDir(c *gin.Context) {
 	var f *os.File
 	var err error
 	if f, err = os.Open(path); err != nil {
-		StatDirError(c, path, err, http.StatusNotFound)
+		w := c.Writer
+		w.WriteHeader(http.StatusNotFound)
 		return
 	}
 	defer f.Close()

@@ -84,19 +84,20 @@ func runSynchro(sourceUrl string, targetUrl string) {
 
 	for {
 		path := <-listChan
+		if path[len(path)-1] == '/' {
+			setCurrent(path, "")
+		}
 		go listConsumer(sourceUrl, targetUrl, path)
-		logrus.Debugf("runSynchro len chan %d sleeping", len(listChan))
-		time.Sleep(time.Second)
 		logrus.Debugf("runSynchro len chan %d", len(listChan))
 		count := 0
 		for len(listChan) == 0 {
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 			count += 1
-			if count == 60 {
+			if count == 600 {
 				break
 			}
 		}
-		if count >= 60 {
+		if count >= 600 {
 			break
 		}
 	}
