@@ -21,6 +21,7 @@ var mu sync.Mutex
 var currentDirs = make(map[string]bool)
 var currentContents = make(map[string]bool)
 var maxOutstanding = 5
+var entries = []string{}
 
 func usage() {
 	log.Fatalf("Incorrect flags please read the documentation")
@@ -76,33 +77,49 @@ func getCurrentDir(dir string) bool {
 	return currentDirs[dir]
 }
 
+func pushEntry(id string, newEntries []string) {
+	logrus.Debugf("pushEntry %s: %d <- %d", id, len(entries), len(newEntries))
+	mu.Lock()
+	defer mu.Unlock()
+	for _, entry := range newEntries {
+		entries = append(entries, entry)
+	}
+}
+
+func pullEntry(id string) (entry string) {
+	logrus.Debugf("pullEntry %s: %d", id, len(entries))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(entries) == 0 {
+		return
+	}
+	entry = entries[0]
+	entries = entries[1:len(entries)]
+	logrus.Debugf("pullEntry %s: %d -> %s", id, len(entries), entry)
+	return
+}
+
 func runSynchro(sourceUrl string, targetUrl string) {
-	entriesChan := make(chan []string, maxOutstanding)
 	currentChan := make(chan string)
 
 	logrus.Debugf("runSynchro %s %s", sourceUrl, targetUrl)
 
 	for i := 0; i < maxOutstanding; i++ {
-		go listConsumer(sourceUrl, targetUrl, entriesChan, currentChan)
+		ecId := fmt.Sprintf("EC#%d", i)
+		go entryConsumer(ecId, sourceUrl, targetUrl, currentChan)
 	}
 
-	entriesChan <- []string{"/"}
+	id := "RSYN"
+	pushEntry(id, []string{"/"})
 
 	for {
-		entries := <-entriesChan
-		logrus.Debugf("runSynchro len entries %d", len(entries))
-
-		for _, path := range entries {
-			if path[len(path)-1] == '/' {
-				setCurrent(path, "")
-			}
-			logrus.Debugf("runSynchro currentChan %s", currentChan)
-			currentChan <- path
-		}
-
-		logrus.Debugf("runSynchro len entriesChan %d", len(entriesChan))
+		path := ""
 		count := 0
-		for len(entriesChan) == 0 {
+		for {
+			path = pullEntry(id)
+			if path != "" {
+				break
+			}
 			time.Sleep(100 * time.Millisecond)
 			count += 1
 			if count == 600 {
@@ -112,32 +129,32 @@ func runSynchro(sourceUrl string, targetUrl string) {
 		if count >= 600 {
 			break
 		}
+
+		if path[len(path)-1] == '/' {
+			setCurrent(path, "")
+		}
+		logrus.Debugf("runSynchro currentChan <- %s", path)
+		currentChan <- path
 	}
 	logrus.Debugf("runSynchro %s %s exiting", sourceUrl, targetUrl)
-
 }
 
-func listConsumer(sourceUrl string, targetUrl string, entriesChan chan []string, currentChan chan string) {
+func entryConsumer(id string, sourceUrl string, targetUrl string, currentChan chan string) {
 	for {
 		path := <-currentChan
-		logrus.Debugf("listConsumer %s", path)
+		logrus.Debugf("entryConsumer%s %s", id, path)
 		if path[len(path)-1] == '/' {
 			setCurrent(path, "")
 			defer clearCurrent(path, "")
 			waitForParentDir(path)
-			entries := synchroDir(sourceUrl, targetUrl, path)
+			entries := synchroDir(id, sourceUrl, targetUrl, path)
 			clearCurrent(path, "")
-			entriesChan <- entries
+			pushEntry(id, entries)
 		} else {
 			setCurrent("", path)
 			defer clearCurrent("", path)
 			waitForParentDir(path)
-			synchroContent(sourceUrl, targetUrl, path)
-		}
-		if debug {
-			logrus.Debugf("listConsumer %s sleep", path)
-			time.Sleep(5 * time.Second)
-
+			synchroContent(id, sourceUrl, targetUrl, path)
 		}
 	}
 }
@@ -163,7 +180,7 @@ func waitForParentDir(path string) {
 	}
 }
 
-func synchroDir(sourceUrl string, targetUrl string, path string) (entries []string) {
+func synchroDir(id string, sourceUrl string, targetUrl string, path string) (entries []string) {
 	var req *http.Request
 	var resp *http.Response
 	var err error
@@ -179,7 +196,7 @@ func synchroDir(sourceUrl string, targetUrl string, path string) (entries []stri
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
-		logrus.Debugf("synchroDir %s exists", path)
+		logrus.Debugf("synchroDir%s %s exists", id, path)
 		exists = true
 	}
 
@@ -191,7 +208,7 @@ func synchroDir(sourceUrl string, targetUrl string, path string) (entries []stri
 			log.Printf("synchroDir: put: %s error %v", path, err)
 			return
 		}
-		logrus.Debugf("synchroDir %s DO %v", path, req)
+		logrus.Debugf("synchroDir%s %s DO %v", id, path, req)
 
 		resp, err = client.Do(req)
 		if err != nil {
@@ -220,7 +237,7 @@ func synchroDir(sourceUrl string, targetUrl string, path string) (entries []stri
 	rd := bufio.NewReader(resp.Body)
 	for {
 		line, err := rd.ReadString('\n')
-		logrus.Debugf("synchroDir ReadString line %s err %s", line, err)
+		logrus.Debugf("synchroDir%s ReadString line %s err %s", id, line, err)
 
 		if err == io.EOF || line == "\n" {
 			break
@@ -229,20 +246,19 @@ func synchroDir(sourceUrl string, targetUrl string, path string) (entries []stri
 			log.Printf("synchroDir: read: %s error %v", path, err)
 			return
 		}
-		logrus.Debugf("synchroDir ReadString entries append %s (%s)", line[len(urlPrefix(sourceUrl))+1:len(line)-1], urlPrefix(sourceUrl))
+		logrus.Debugf("synchroDir%s ReadString entries append %s (%s)", id, line[len(urlPrefix(sourceUrl))+1:len(line)-1], urlPrefix(sourceUrl))
 		entries = append(entries, line[len(urlPrefix(sourceUrl))+1:len(line)-1])
-		// listChan <- line[len(urlPrefix(sourceUrl))+1 : len(line)-1]
 	}
 	return
 }
 
-func synchroContent(sourceUrl string, targetUrl string, path string) {
+func synchroContent(id string, sourceUrl string, targetUrl string, path string) {
 	var req *http.Request
 	var resp *http.Response
 	var err error
 	var targetCs string
 
-	logrus.Debugf("synchroContent %s", path)
+	logrus.Debugf("synchroContent%s %s", id, path)
 
 	statUrl := fmt.Sprintf("%s%s", targetUrl, path)
 	resp, err = http.Head(statUrl)
@@ -253,7 +269,7 @@ func synchroContent(sourceUrl string, targetUrl string, path string) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
 		targetCs = resp.Header.Get("Checksum")
-		logrus.Debugf("synchroContent %s exists Checksum %s", path, targetCs)
+		logrus.Debugf("synchroContent%s %s exists Checksum %s", id, path, targetCs)
 	}
 
 	if targetCs != "" {
@@ -266,7 +282,7 @@ func synchroContent(sourceUrl string, targetUrl string, path string) {
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusOK {
 			if resp.Header.Get("Checksum") == targetCs {
-				logrus.Debugf("synchroContent %s exists with same Checksum %s", path, targetCs)
+				logrus.Debugf("synchroContent%s %s exists with same Checksum %s", id, path, targetCs)
 				return
 			}
 		}
@@ -310,7 +326,7 @@ func synchroContent(sourceUrl string, targetUrl string, path string) {
 		return
 	}
 	req.Header.Add("Last-Modified", resp.Header.Get("Last-Modified"))
-	logrus.Debugf("synchroContent %s DO %v", path, req)
+	logrus.Debugf("synchroContent%s %s DO %v", id, path, req)
 
 	resp, err = client.Do(req)
 	if err != nil {
