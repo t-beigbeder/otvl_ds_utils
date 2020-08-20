@@ -31,6 +31,7 @@ func main() {
 	var fDebug = flag.Bool("debug", false, "Displays debug messages and run gin in debug mode")
 	var sourceUrl = flag.String("source-url", "", "Source URL")
 	var targetUrl = flag.String("target-url", "", "Target URL")
+	var maxWait = flag.Int("max-wait", 600, "Time to wait before exiting in 1/10s, defaults to 0.6s")
 	flag.Parse()
 	if *sourceUrl == "" {
 		log.Fatalf("Empty source-url, please read the documentation")
@@ -47,7 +48,7 @@ func main() {
 	}
 	logrus.Info("synchro: main: started")
 	logrus.Debug("synchro: main: see if we are in debug mode")
-	runSynchro(*sourceUrl, *targetUrl)
+	runSynchro(*sourceUrl, *targetUrl, *maxWait)
 	return
 }
 
@@ -99,7 +100,7 @@ func pullEntry(id string) (entry string) {
 	return
 }
 
-func runSynchro(sourceUrl string, targetUrl string) {
+func runSynchro(sourceUrl string, targetUrl string, maxWait int) {
 	currentChan := make(chan string)
 
 	logrus.Debugf("runSynchro %s %s", sourceUrl, targetUrl)
@@ -122,11 +123,11 @@ func runSynchro(sourceUrl string, targetUrl string) {
 			}
 			time.Sleep(100 * time.Millisecond)
 			count += 1
-			if count == 600 {
+			if count == maxWait {
 				break
 			}
 		}
-		if count >= 600 {
+		if count >= maxWait {
 			break
 		}
 
